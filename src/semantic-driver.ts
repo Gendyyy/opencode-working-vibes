@@ -23,6 +23,12 @@ export interface SemanticDriverConfig extends CadenceConfig {
   readonly timeoutMs: number;
   /** Maximum accepted words. */
   readonly maxWords: number;
+  /**
+   * Dispatch on the first signal with no debounce, burst cap or floor, so a
+   * live tool turn paints as it happens. One call still runs at a time; a
+   * signal that arrives mid-call is dispatched the moment it lands.
+   */
+  readonly realtime?: boolean;
 }
 
 export interface SemanticDriverOptions {
@@ -56,6 +62,8 @@ export class SemanticDriver {
   #timer: ReturnType<typeof setInterval> | undefined;
   #inflight: AbortController | undefined;
   #running = false;
+  /** A signal arrived mid-call; dispatch again as soon as it lands. */
+  #replay = false;
 
   constructor(options: SemanticDriverOptions) {
     this.#options = options;
@@ -69,6 +77,7 @@ export class SemanticDriver {
     this.#buffer.reset();
     this.#accepted = [];
     this.#current = null;
+    this.#replay = false;
     cadenceReset(this.#cadence);
     this.#running = true;
     this.#timer ??= this.#setTimer(() => void this.tick(), TICK_MS);
@@ -78,6 +87,7 @@ export class SemanticDriver {
   /** End a turn: stop the timer and abandon any in-flight call. */
   stop(): void {
     this.#running = false;
+    this.#replay = false;
     if (this.#timer !== undefined) {
       this.#clearTimer(this.#timer);
       this.#timer = undefined;
@@ -87,24 +97,29 @@ export class SemanticDriver {
     endDispatch(this.#cadence);
   }
 
+  #mark(): void {
+    markActivity(this.#cadence, this.#now());
+    if (this.#options.config.realtime && this.#running) this.#dispatchSoon();
+  }
+
   recordRequest(prompt: string): void {
     this.#buffer.recordRequest(prompt);
-    markActivity(this.#cadence, this.#now());
+    this.#mark();
   }
 
   recordToolCall(name: string, args: unknown): void {
     this.#buffer.recordToolCall(name, args);
-    markActivity(this.#cadence, this.#now());
+    this.#mark();
   }
 
   recordFailure(name: string): void {
     this.#buffer.recordFailure(name);
-    markActivity(this.#cadence, this.#now());
+    this.#mark();
   }
 
   recordAssistantText(text: string): void {
     this.#buffer.recordAssistantText(text);
-    markActivity(this.#cadence, this.#now());
+    this.#mark();
   }
 
   /** Exposed for tests and diagnostics. */
@@ -112,13 +127,37 @@ export class SemanticDriver {
     return this.#current;
   }
 
-  /** One cadence decision. Public so tests can drive it without real timers. */
+  /**
+   * One dispatch decision. Public so tests can drive it without real timers.
+   *
+   * In realtime mode the cadence gate is bypassed entirely: a pending signal
+   * dispatches immediately, and a signal arriving during a call is replayed as
+   * soon as that call finishes instead of waiting out a debounce.
+   */
   async tick(): Promise<void> {
     if (!this.#running) return;
+    if (this.#options.config.realtime) {
+      if (this.#cadence.inFlight) {
+        this.#replay = true;
+        return;
+      }
+      if (!this.#buffer.hasPending) return;
+      await this.#dispatch();
+      return;
+    }
     const now = this.#now();
     const action = cadenceTick(this.#cadence, now, this.#options.config, this.#buffer.hasPending);
     if (action !== "dispatch") return;
     await this.#dispatch();
+  }
+
+  /** Dispatch right now if possible; otherwise queue one replay for the current call. */
+  #dispatchSoon(): void {
+    if (this.#cadence.inFlight) {
+      this.#replay = true;
+      return;
+    }
+    void this.tick();
   }
 
   async #dispatch(): Promise<void> {
@@ -182,6 +221,12 @@ export class SemanticDriver {
     } finally {
       if (this.#inflight === controller) this.#inflight = undefined;
       endDispatch(this.#cadence);
+      // Realtime: a signal that arrived while this call was in flight is now
+      // dispatchable, so paint it without waiting for the next cadence window.
+      if (this.#replay) {
+        this.#replay = false;
+        void this.tick();
+      }
     }
   }
 

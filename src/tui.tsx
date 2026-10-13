@@ -10,7 +10,7 @@ import type { Renderable, TextNodeRenderable, TextRenderable } from "@opentui/co
 import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show } from "solid-js";
 
 import { latestToolActivity } from "./activity.js";
 import {
@@ -58,7 +58,7 @@ function trace(message: string): void {
 
 // Stamped at load so a stale TUI (one started before the last edit) is instantly
 // obvious in the debug log instead of being mistaken for the new code.
-const BUILD = "agent-color-1";
+const BUILD = "realtime-index-1";
 trace(`module loaded pid=${process.pid} cwd=${process.cwd()} build=${BUILD}`);
 
 /** The message slice after the last user message (the current turn). */
@@ -168,11 +168,18 @@ function VibeLabel(props: {
       fallback={<text fg={base()} wrapMode="none">{props.text}</text>}
     >
       <text fg={props.color === "rainbow" ? undefined : base()} wrapMode="none">
-        <For each={characters()}>
+        {/*
+          Index, not For: For reconciles by item value and characters repeat
+          constantly, so many positions would share one span and the sweep would
+          paint conflicting band colors onto that single node at once (random,
+          disorganized flashing). Index is keyed by position, which is exactly
+          what a per-character sweep needs.
+        */}
+        <Index each={characters()}>
           {(char, index) => (
             <span
               ref={(node: TextNodeRenderable) => {
-                const position = index();
+                const position = index;
                 styledNodes.set(position, node);
                 node.fg = props.shimmer
                   ? charColor(position, shimmerPhase())
@@ -182,7 +189,7 @@ function VibeLabel(props: {
               {char}
             </span>
           )}
-        </For>
+        </Index>
       </text>
     </Show>
   );
@@ -236,6 +243,9 @@ function VibeChip(props: {
         minIntervalMs: cfg().semanticMinIntervalMs,
         timeoutMs: cfg().semanticTimeoutMs,
         maxWords: cfg().semanticMaxWords,
+        // Tools mode narrates a live turn, so it must not sit on a debounce or
+        // a call floor; semantic mode keeps the throttled cadence.
+        realtime: cfg().strategy === "tools",
       },
       summarize: (excerpt, signal) => {
         const settings = cfg();

@@ -187,12 +187,19 @@ describe("driver", () => {
     shown: string[];
     traces: Record<string, unknown>[];
     advance: (ms: number) => void;
-    setReply: (reply: string | (() => Promise<string>)) => void;
+    setReply: (reply: string | (() => string | Promise<string>)) => void;
   }
 
-  function makeHarness(config: Partial<{ debounceMs: number; maxWaitMs: number; minIntervalMs: number; maxWords: number }> = {}): Harness {
+  /** Let every pending microtask and the auto-dispatches they trigger settle. */
+  const flush = async (): Promise<void> => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
+  function makeHarness(
+    config: Partial<{ debounceMs: number; maxWaitMs: number; minIntervalMs: number; maxWords: number; realtime: boolean }> = {},
+  ): Harness {
     let clock = 0;
-    let reply: string | (() => Promise<string>) = "Investigating why the parser fails";
+    let reply: string | (() => string | Promise<string>) = "Investigating why the parser fails";
     const calls: string[] = [];
     const shown: string[] = [];
     const traces: Record<string, unknown>[] = [];
@@ -346,5 +353,75 @@ describe("driver", () => {
     release?.();
     await pending;
     expect(harness.shown.length).toBe(1);
+  });
+
+  describe("realtime", () => {
+    test("dispatches on the first signal with no debounce, burst cap or floor", async () => {
+      const harness = makeHarness({ realtime: true });
+      harness.driver.start();
+      // No clock movement at all: the throttled driver would still be waiting.
+      harness.driver.recordToolCall("read", { filePath: "parser.ts" });
+      await flush();
+      expect(harness.calls.length).toBe(1);
+      expect(harness.shown.length).toBe(1);
+    });
+
+    test("ignores the call floor that throttles the semantic strategy", async () => {
+      const harness = makeHarness({ realtime: true });
+      harness.driver.start();
+      harness.driver.recordToolCall("read", { filePath: "a.ts" });
+      await flush();
+      // Same clock reading as the previous call: minIntervalMs would block this.
+      harness.driver.recordToolCall("edit", { filePath: "b.ts" });
+      await flush();
+      expect(harness.calls.length).toBe(2);
+    });
+
+    test("replays a signal that arrives mid-call as soon as it lands", async () => {
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const harness = makeHarness({ realtime: true });
+      harness.driver.start();
+      harness.setReply(async () => {
+        await gate;
+        return "Checking the parser output";
+      });
+      harness.driver.recordToolCall("read", { filePath: "a.ts" });
+      await flush();
+      expect(harness.calls.length).toBe(1);
+
+      harness.setReply(() => "Fixing the parser import");
+      // Arrives while the first call is in flight: must not start a second call.
+      harness.driver.recordToolCall("edit", { filePath: "b.ts" });
+      await flush();
+      expect(harness.calls.length).toBe(1);
+
+      release?.();
+      await flush();
+      expect(harness.calls.length).toBe(2);
+      expect(harness.shown).toEqual(["Checking the parser output", "Fixing the parser import"]);
+    });
+
+    test("a replay queued before stop() is discarded", async () => {
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const harness = makeHarness({ realtime: true });
+      harness.driver.start();
+      harness.setReply(async () => {
+        await gate;
+        return "Checking the parser output";
+      });
+      harness.driver.recordToolCall("read", { filePath: "a.ts" });
+      await flush();
+      harness.driver.recordToolCall("edit", { filePath: "b.ts" });
+      harness.driver.stop();
+      release?.();
+      await flush();
+      expect(harness.calls.length).toBe(1);
+    });
   });
 });

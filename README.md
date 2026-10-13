@@ -25,8 +25,13 @@ activity buffer, cadence gate, and de-duplication policy are reused.
   65ms highlight sweep, accent/dim trail, and pause between passes.
 - **Model-only text:** the model is the sole writer of the chip's label in both
   strategies. Until the first model line lands, the chip shows the spinner alone.
-- **Cadence, not chatter:** a 1.5s quiet period, a 2.5s cap on a continuously
-  streaming turn, and a 2.5s floor between calls; an idle turn makes zero calls.
+- **Cadence, not chatter:** `semantic` mode waits for a 1.5s quiet period, caps a
+  continuously streaming turn at 2.5s, and keeps a 2.5s floor between calls; an idle
+  turn makes zero calls.
+- **Real-time tool narration:** `tools` mode skips that throttle entirely — each tool
+  call paints as soon as it lands, with no debounce and no floor. One call still runs
+  at a time, and a tool that arrives mid-call is narrated the moment the current
+  answer lands, so nothing is dropped.
 - **De-duplication:** a reworded answer is withheld instead of repainted; a `SKIP`
   consumes the delta, while a rejected answer is kept for the next call.
 - **Claude Code colors:** spinner and label default to Claude Code orange
