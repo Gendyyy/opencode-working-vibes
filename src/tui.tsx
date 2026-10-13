@@ -58,7 +58,7 @@ function trace(message: string): void {
 
 // Stamped at load so a stale TUI (one started before the last edit) is instantly
 // obvious in the debug log instead of being mistaken for the new code.
-const BUILD = "exec-tool-coverage-1";
+const BUILD = "strategy-trace-1";
 trace(`module loaded pid=${process.pid} cwd=${process.cwd()} build=${BUILD}`);
 
 /** The message slice after the last user message (the current turn). */
@@ -254,7 +254,9 @@ function VibeChip(props: {
           settings.strategy === "tools"
             ? buildToolSummaryPrompt(excerpt, settings.semanticMaxWords)
             : buildSummaryPrompt(excerpt, settings.semanticMaxWords);
-        trace(`semantic request model=${JSON.stringify(model ?? null)} override=${JSON.stringify(settings.model ?? null)}`);
+        trace(
+          `semantic request strategy=${settings.strategy} realtime=${settings.strategy === "tools"} model=${JSON.stringify(model ?? null)} override=${JSON.stringify(settings.model ?? null)}`,
+        );
         return generateText(props.context.client, { prompt, model, signal });
       },
       display: (line) => setVibeLine(line),
