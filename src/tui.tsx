@@ -58,7 +58,7 @@ function trace(message: string): void {
 
 // Stamped at load so a stale TUI (one started before the last edit) is instantly
 // obvious in the debug log instead of being mistaken for the new code.
-const BUILD = "realtime-index-1";
+const BUILD = "exec-tool-coverage-1";
 trace(`module loaded pid=${process.pid} cwd=${process.cwd()} build=${BUILD}`);
 
 /** The message slice after the last user message (the current turn). */

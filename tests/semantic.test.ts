@@ -51,6 +51,36 @@ describe("activity", () => {
     expect(describeToolCall("ls", {})).toBe("ls");
   });
 
+  test("exec and execute follow the same shell privacy rule as bash", () => {
+    expect(describeToolCall("exec", { command: "curl -H 'token: secret' https://x" })).toBe("exec");
+    expect(describeToolCall("execute", { command: "bun test", description: "Running the suite" })).toBe(
+      "execute (Running the suite)",
+    );
+    // A secret in the model-written description is still redacted.
+    expect(describeToolCall("exec", { description: "curl with token: abc123def456" })).toBe(
+      "exec (curl with token: <redacted>)",
+    );
+  });
+
+  test("covers the tool names newer builds add", () => {
+    expect(describeToolCall("list", { path: "src/activity.ts" })).toBe("list src/activity.ts");
+    expect(describeToolCall("apply_patch", { filePath: "src/tui.tsx" })).toBe("apply_patch src/tui.tsx");
+    expect(describeToolCall("websearch", { query: "solid index vs for" })).toBe("websearch solid index vs for");
+    expect(describeToolCall("todowrite", { content: "anything" })).toBe("todowrite");
+  });
+
+  test("an unknown tool still narrates from a safe argument instead of its bare name", () => {
+    expect(describeToolCall("some_future_tool", { description: "Rewriting the manifest" })).toBe(
+      "some_future_tool Rewriting the manifest",
+    );
+    expect(describeToolCall("some_future_tool", { filePath: "src/x.ts" })).toBe("some_future_tool src/x.ts");
+    // Free-form bodies are never probed: they routinely carry secrets.
+    expect(describeToolCall("some_future_tool", { command: "rm -rf /", script: "curl x", content: "y" })).toBe(
+      "some_future_tool",
+    );
+    expect(describeToolCall("no_args_tool", {})).toBe("no_args_tool");
+  });
+
   test("selects the newest running tool, falls back to active predecessors, then the last completion", () => {
     const snapshot = (tools: unknown[]) => [{ type: "assistant", content: tools }];
     const read = (status: string, ran: number, completed?: number) => ({

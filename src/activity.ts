@@ -65,13 +65,41 @@ const SALIENT_ARGUMENTS: Readonly<Record<string, readonly string[]>> = {
   edit: ["filePath", "path"],
   multiedit: ["filePath", "path"],
   ls: ["path"],
+  list: ["path"],
   grep: ["pattern"],
   glob: ["pattern"],
   webfetch: ["url"],
   fetch: ["url"],
+  websearch: ["query"],
+  apply_patch: ["filePath", "path"],
+  patch: ["filePath", "path"],
   task: ["description", "subagent_type"],
   todowrite: [],
+  invalid: [],
 };
+
+/**
+ * Shell tools across OpenCode builds. `exec`/`execute` are the names newer
+ * builds use, so they must be covered by the same privacy rule as `bash`.
+ */
+const SHELL_TOOLS = new Set(["bash", "shell", "exec", "execute"]);
+
+/**
+ * Arguments tried, in order, for a tool this build has never seen. Without this,
+ * one new tool name silently degrades its line to the bare tool name and the
+ * model has nothing to narrate. Deliberately excludes free-form bodies
+ * (`command`, `script`, `content`, `args`) that routinely carry secrets.
+ */
+const GENERIC_SALIENT_ARGUMENTS: readonly string[] = [
+  "description",
+  "filePath",
+  "path",
+  "pattern",
+  "query",
+  "url",
+  "name",
+  "subagent_type",
+];
 
 function argumentText(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
@@ -85,18 +113,22 @@ function argumentText(args: Record<string, unknown>, key: string): string | unde
 /** One-line description of a tool call for the excerpt. */
 export function describeToolCall(name: string, args: unknown): string {
   const record = isRecord(args) ? args : {};
-  const keys = SALIENT_ARGUMENTS[name] ?? SALIENT_ARGUMENTS[name.toLowerCase()];
-  const detail = keys
-    ? keys.map((key) => argumentText(record, key)).find((value) => value && value.trim())
-    : undefined;
+  const lower = name.toLowerCase();
 
-  // Bash commands routinely embed credentials, so only the model-written
-  // description (OpenCode's bash `description` argument) is carried.
-  if (name === "bash" || name === "shell") {
+  // Shell commands routinely embed credentials, so only the model-written
+  // description (OpenCode's `description` argument) is ever carried — never the
+  // command itself. `exec`/`execute` are the same tool under newer names.
+  if (SHELL_TOOLS.has(lower)) {
     const intent = record.description;
     const label = typeof intent === "string" ? oneLine(redactSecrets(intent), 100) : "";
     return label ? `${name} (${label})` : name;
   }
+
+  const mapped = SALIENT_ARGUMENTS[name] ?? SALIENT_ARGUMENTS[lower];
+  const keys = mapped ?? GENERIC_SALIENT_ARGUMENTS;
+  const detail = keys
+    .map((key) => argumentText(record, key))
+    .find((value) => value && value.trim());
 
   if (!detail) return name;
   return `${name} ${oneLine(redactSecrets(detail), 120)}`;
