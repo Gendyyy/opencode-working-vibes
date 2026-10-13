@@ -1,0 +1,46 @@
+{
+  "name": "@agendy/opencode-working-vibes",
+  "version": "0.1.0",
+  "description": "Themed working-vibes intent chip above the OpenCode composer: animated spinner, shimmer, and AI-generated activity labels",
+  "type": "module",
+  "license": "MIT",
+  "author": "Ahmed Gendy",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "working-vibes",
+    "intent",
+    "spinner",
+    "shimmer"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "0.0.0-beta-17898"
+  },
+  "devDependencies": {
+    "@opencode-ai/client": "0.0.0-beta-17898",
+    "@opentui/core": "0.6.0",
+    "@opentui/solid": "0.6.0",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^24.0.0",
+    "solid-js": "1.9.10",
+    "typescript": "^5.9.0"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.6.0",
+    "@opentui/solid": ">=0.6.0",
+    "solid-js": ">=1.9.0"
+  }
+}
