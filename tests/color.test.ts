@@ -2,8 +2,8 @@
 import { describe, expect, test } from "bun:test";
 import { RGBA } from "@opentui/core";
 
-import { bandColor, rainbowColorAt, rainbowColorForCharacter, resolveColor, shimmerBand, type ThemeLike } from "../src/color.js";
-import { DEFAULT_SETTINGS, CLAUDE_CODE_ORANGE, resolveSettings, SHIMMER_FRAME_MS, SPINNER_FRAMES } from "../src/settings.js";
+import { bandColor, rainbowColorAt, rainbowColorForCharacter, resolveAgentColor, resolveColor, shimmerBand, type ThemeLike } from "../src/color.js";
+import { BUILTIN_AGENT_COLORS, CLAUDE_CODE_ORANGE, DEFAULT_SETTINGS, resolveSettings, SHIMMER_FRAME_MS, SPINNER_FRAMES } from "../src/settings.js";
 
 const theme: ThemeLike = {
   text: {
@@ -78,6 +78,27 @@ describe("rainbow + shimmer", () => {
   });
 });
 
+describe("resolveAgentColor", () => {
+  const sources = {
+    overrides: { plan: "#112233" },
+    hosted: [{ id: "debug", color: "warning" }],
+    builtin: BUILTIN_AGENT_COLORS,
+  };
+
+  test("prefers overrides, then host definitions, then built-ins", () => {
+    expect(resolveAgentColor("plan", sources)).toBe("#112233");
+    expect(resolveAgentColor("debug", sources)).toBe("warning");
+    expect(resolveAgentColor("build", sources)).toBe(CLAUDE_CODE_ORANGE);
+  });
+
+  test("matches host entries by name and ignores invalid colors", () => {
+    expect(resolveAgentColor("Debugger", { overrides: {}, hosted: [{ id: "x", name: "Debugger", color: "error" }], builtin: {} })).toBe("error");
+    expect(resolveAgentColor("plan", { overrides: { plan: "bogus" }, hosted: [], builtin: BUILTIN_AGENT_COLORS })).toBe("#6E9FFF");
+    expect(resolveAgentColor("unknown", sources)).toBeUndefined();
+    expect(resolveAgentColor(undefined, sources)).toBeUndefined();
+  });
+});
+
 describe("settings", () => {
   test("ships a Claude-style spinner and semantic strategy defaults", () => {
     expect(SPINNER_FRAMES).toEqual(["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]);
@@ -103,5 +124,13 @@ describe("settings", () => {
     expect(resolveSettings({ color: "subdued" }).color).toBe(CLAUDE_CODE_ORANGE);
     expect(resolveSettings({ spinnerColor: "accent" }).spinnerColor).toBe(CLAUDE_CODE_ORANGE);
     expect(resolveSettings({ color: "#123456" }).color).toBe("#123456");
+  });
+
+  test("follows agent mode colors by default with per-agent overrides", () => {
+    expect(DEFAULT_SETTINGS.agentColor).toBe(true);
+    expect(DEFAULT_SETTINGS.agentColors).toEqual({});
+    expect(BUILTIN_AGENT_COLORS.build).toBe(CLAUDE_CODE_ORANGE);
+    expect(BUILTIN_AGENT_COLORS.plan).toBe("#6E9FFF");
+    expect(resolveSettings({ agentColors: { plan: "#112233" } }).agentColors).toEqual({ plan: "#112233" });
   });
 });

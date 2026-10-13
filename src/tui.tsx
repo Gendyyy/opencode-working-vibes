@@ -17,6 +17,7 @@ import {
   bandColor,
   isVibeColor,
   rainbowColorForCharacter,
+  resolveAgentColor,
   resolveColor,
   shimmerBand,
   type ThemeColor,
@@ -28,6 +29,7 @@ import { generateText, parseModel, type ModelRef } from "./narration.js";
 import { buildSummaryPrompt, buildToolSummaryPrompt } from "./semantic.js";
 import { SemanticDriver } from "./semantic-driver.js";
 import {
+  BUILTIN_AGENT_COLORS,
   DEFAULT_SETTINGS,
   resolveSettings,
   SHIMMER_EXIT_OFFSET,
@@ -56,7 +58,7 @@ function trace(message: string): void {
 
 // Stamped at load so a stale TUI (one started before the last edit) is instantly
 // obvious in the debug log instead of being mistaken for the new code.
-const BUILD = "shimmer-claude-fix-1";
+const BUILD = "agent-color-1";
 trace(`module loaded pid=${process.pid} cwd=${process.cwd()} build=${BUILD}`);
 
 /** The message slice after the last user message (the current turn). */
@@ -194,6 +196,7 @@ function VibeChip(props: {
 }) {
   const [running, setRunning] = createSignal(false);
   const [vibeLine, setVibeLine] = createSignal<string | undefined>();
+  const [currentAgent, setCurrentAgent] = createSignal<string | undefined>(undefined);
 
   let spinnerRenderable: TextRenderable | undefined;
   let driver: SemanticDriver | undefined;
@@ -250,6 +253,20 @@ function VibeChip(props: {
     return driver;
   };
 
+  /** Track the session's agent so spinner/label can follow its mode color. */
+  const updateAgent = (): void => {
+    let agent: string | undefined;
+    try {
+      agent = props.context.data.session.get(props.sessionID)?.agent ?? undefined;
+    } catch {
+      agent = undefined;
+    }
+    if (agent !== currentAgent()) {
+      trace(`chip agent session=${props.sessionID} agent=${agent ?? "none"}`);
+      setCurrentAgent(agent);
+    }
+  };
+
   onMount(() => {
     const readRunning = () => {
       try {
@@ -259,12 +276,14 @@ function VibeChip(props: {
       }
     };
     updateRunning(readRunning());
+    updateAgent();
 
     // Poll the session status: this build does not deliver session.status events
     // to plugin handlers, and the data layer is the source of truth.
     let ticks = 0;
     const timer = setInterval(() => {
       updateRunning(readRunning());
+      updateAgent();
       ticks += 1;
       if (ticks % 3 === 0) void props.context.data.session.message.sync(props.sessionID);
     }, 400);
@@ -297,7 +316,7 @@ function VibeChip(props: {
   // reactive child-text reconciliation in the host renderer.
   createEffect(() => {
     if (!running()) return;
-    trace(`chip animation start session=${props.sessionID} spinner=${spinnerColor()}`);
+    trace(`chip animation start session=${props.sessionID} agent=${currentAgent() ?? "none"} spinner=${spinnerColor()}`);
     trace(
       `chip theme text=${String(theme().text?.base)} muted=${String(theme().text?.muted)} accent=${String(theme().text?.action?.primary?.base)}`,
     );
@@ -409,11 +428,34 @@ function VibeChip(props: {
     }
   });
 
+  /** Spinner + label color for the session's agent mode, when following is on. */
+  const agentModeColor = (): VibeColor | undefined => {
+    const settings = cfg();
+    if (!settings.agentColor) return undefined;
+    const agent = currentAgent();
+    if (!agent) return undefined;
+    let hosted: ReadonlyArray<{ readonly id: string; readonly name?: string; readonly color?: string }> = [];
+    try {
+      hosted = props.context.data.location.agent.list() ?? [];
+    } catch {
+      hosted = [];
+    }
+    return resolveAgentColor(agent, {
+      overrides: settings.agentColors,
+      hosted,
+      builtin: BUILTIN_AGENT_COLORS,
+    });
+  };
+
   const spinnerColor = () => {
+    const mode = agentModeColor();
+    if (mode) return resolveColor(theme(), mode, undefined);
     const configured = cfg().spinnerColor;
     return resolveColor(theme(), isVibeColor(configured) ? configured : undefined, undefined);
   };
   const labelColor = (): VibeColor => {
+    const mode = agentModeColor();
+    if (mode) return mode;
     const configured = cfg().color;
     if (isVibeColor(configured)) return configured;
     return isVibeColor(DEFAULT_SETTINGS.color) ? DEFAULT_SETTINGS.color : "text";
@@ -471,7 +513,7 @@ async function runVibeCommand(
 
   if (parts.length === 0) {
     notify(
-      `Vibe | Strategy: ${settings.strategy} | Model: ${settings.model ?? "session"} | Color: ${settings.color} | Spinner: ${settings.spinnerColor} | Shimmer: ${settings.shimmer ? "on" : "off"} | Max: ${settings.semanticMaxWords} words`,
+      `Vibe | Strategy: ${settings.strategy} | Model: ${settings.model ?? "session"} | AgentColor: ${settings.agentColor ? "on" : "off"} | Color: ${settings.color} | Spinner: ${settings.spinnerColor} | Shimmer: ${settings.shimmer ? "on" : "off"} | Max: ${settings.semanticMaxWords} words`,
     );
     return;
   }
@@ -517,15 +559,47 @@ async function runVibeCommand(
       notify(`Vibe ${action}: ${isMessageColor ? settings.color : settings.spinnerColor}`);
       return;
     }
-    if (value !== "default" && !isVibeColor(value)) {
-      notify("Use text|subdued|accent|success|warning|error|rainbow|#RRGGBB.", "error");
+    // "auto" resumes following the session agent's mode color; a fixed color
+    // pauses following so the explicit choice wins.
+    if (value !== "auto" && value !== "default" && !isVibeColor(value)) {
+      notify("Use text|subdued|accent|success|warning|error|rainbow|#RRGGBB, or 'auto'.", "error");
       return;
     }
     await updateSettings((draft) => {
-      if (isMessageColor) draft.color = value === "default" ? DEFAULT_SETTINGS.color : value;
-      else draft.spinnerColor = value === "default" ? DEFAULT_SETTINGS.spinnerColor : value;
+      if (value === "auto" || value === "default") {
+        if (isMessageColor) draft.color = DEFAULT_SETTINGS.color;
+        else draft.spinnerColor = DEFAULT_SETTINGS.spinnerColor;
+        draft.agentColor = true;
+      } else {
+        if (isMessageColor) draft.color = value;
+        else draft.spinnerColor = value;
+        draft.agentColor = false;
+      }
     });
-    notify(`Vibe ${action} set to ${value}`);
+    notify(value === "auto" || value === "default" ? `Vibe ${action} follows the agent mode` : `Vibe ${action} set to ${value}`);
+    return;
+  }
+
+  if (action === "agent-color") {
+    const agent = rest[0]?.toLowerCase();
+    const value = rest.slice(1).join(" ").trim().toLowerCase();
+    if (!agent) {
+      const entries = Object.entries(settings.agentColors);
+      notify(entries.length === 0 ? "Vibe agent colors: none" : `Vibe agent colors: ${entries.map(([name, color]) => `${name}=${color}`).join(", ")}`);
+      return;
+    }
+    if (value && value !== "default" && !isVibeColor(value)) {
+      notify("Usage: /vibe agent-color <agent> <color|default>", "error");
+      return;
+    }
+    await updateSettings((draft) => {
+      if (!value || value === "default") delete draft.agentColors[agent];
+      else {
+        draft.agentColors[agent] = value;
+        draft.agentColor = true;
+      }
+    });
+    notify(!value || value === "default" ? `Vibe agent color cleared for ${agent}` : `Vibe agent color for ${agent} set to ${value}`);
     return;
   }
 
@@ -546,7 +620,7 @@ async function runVibeCommand(
     return;
   }
 
-  notify("Usage: /vibe [strategy semantic|tools] [model provider/model] [color name] [spinner-color name] [shimmer on|off]", "error");
+  notify("Usage: /vibe [strategy semantic|tools] [model provider/model] [color name|auto] [spinner-color name|auto] [agent-color <agent> <color|default>] [shimmer on|off]", "error");
 }
 
 /** Register the `/vibe` slash command and palette entry. */

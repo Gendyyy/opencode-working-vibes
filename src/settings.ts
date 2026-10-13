@@ -4,6 +4,12 @@
 /** Claude Code's brand orange, used for the spinner and label by default. */
 export const CLAUDE_CODE_ORANGE = "#D97757";
 
+/** Built-in spinner/label colors per agent mode; the host or user can override. */
+export const BUILTIN_AGENT_COLORS: Record<string, string> = {
+  build: CLAUDE_CODE_ORANGE,
+  plan: "#6E9FFF",
+};
+
 // Claude Code's asterisk spinner, expanding then contracting, at 120ms.
 export const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 export const SPINNER_INTERVAL_MS = 120;
@@ -25,6 +31,10 @@ export interface VibeSettings {
   model: string | null;
   color: string;
   spinnerColor: string;
+  /** Follow the session agent's mode color for spinner and label. */
+  agentColor: boolean;
+  /** Explicit per-agent color overrides, keyed by agent id. */
+  agentColors: Record<string, string>;
   shimmer: boolean;
   /** Select broad activity narration or tool-focused narration. */
   strategy: GenerationStrategy;
@@ -39,6 +49,8 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   model: null,
   color: CLAUDE_CODE_ORANGE,
   spinnerColor: CLAUDE_CODE_ORANGE,
+  agentColor: true,
+  agentColors: {},
   shimmer: true,
   strategy: "semantic",
   semanticMaxWords: 12,

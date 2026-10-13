@@ -40,6 +40,37 @@ export type VibeColor =
   | "rainbow"
   | `#${string}`
 
+/** An agent entry carrying the optional host-defined color (mirrors AgentInfo). */
+export interface AgentLike {
+  readonly id: string;
+  readonly name?: string;
+  readonly color?: string;
+}
+
+export interface AgentColorSources {
+  /** Explicit per-agent overrides from settings; checked before host definitions. */
+  readonly overrides: Readonly<Record<string, string>>;
+  /** Agents known from the host (opencode.json may define their colors). */
+  readonly hosted: ReadonlyArray<AgentLike>;
+  /** Built-in fallback colors for well-known agents. */
+  readonly builtin: Readonly<Record<string, string>>;
+}
+
+/**
+ * Resolve the color for an agent id: explicit override, host definition,
+ * built-in fallback. Returns undefined when nothing defines one.
+ */
+export function resolveAgentColor(agent: string | undefined, sources: AgentColorSources): VibeColor | undefined {
+  if (!agent) return undefined;
+  const override = sources.overrides[agent];
+  if (override && isVibeColor(override)) return override;
+  const hosted = sources.hosted.find((entry) => entry.id === agent || entry.name === agent)?.color;
+  if (hosted && isVibeColor(hosted)) return hosted;
+  const fallback = sources.builtin[agent];
+  if (fallback && isVibeColor(fallback)) return fallback;
+  return undefined;
+}
+
 // pi's rainbow palette, kept verbatim including its wrap-around entry.
 const RAINBOW_COLORS = ["#b281d6", "#d787af", "#febc38", "#e4c00f", "#89d281", "#00afaf", "#178fb9", "#b281d6"];
 

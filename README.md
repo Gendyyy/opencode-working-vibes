@@ -30,10 +30,13 @@ activity buffer, cadence gate, and de-duplication policy are reused.
 - **De-duplication:** a reworded answer is withheld instead of repainted; a `SKIP`
   consumes the delta, while a rejected answer is kept for the next call.
 - **Claude Code colors:** spinner and label default to Claude Code orange
-  (`#D97757`). Named OpenCode theme colors (`text`, `subdued`, `accent`,
-  `success`, `warning`, `error`), `rainbow`, or any hex color work via
-  `/vibe color` and `/vibe spinner-color`; the shimmer sweep's highlight, accent,
-  and dim bands still resolve from the live theme.
+  (`#D97757`). With agent following on (the default), they track the session
+  agent's mode color instead: `build` stays Claude orange, `plan` turns blue
+  (`#6E9FFF`), and any agent color you define in `opencode.json` wins over both.
+  Named OpenCode theme colors (`text`, `subdued`, `accent`, `success`, `warning`,
+  `error`), `rainbow`, or any hex color work via `/vibe color`,
+  `/vibe spinner-color`, and `/vibe agent-color <agent> <color>`; the shimmer
+  sweep's highlight, accent, and dim bands still resolve from the live theme.
 - Clears itself when the turn settles; shows nothing while idle.
 
 > The label is generated from the turn's activity via the server's text-generation
@@ -76,8 +79,10 @@ entry) and `tui.ts` shims for OpenCode's `plugins/` directory discovery.
   /vibe strategy semantic|tools     # choose broad activity or tool-focused narration
 /vibe model provider/model-id[#variant] # override the model (default: session model)
 /vibe model default                # go back to the session model
-/vibe color accent                 # label color: text|subdued|accent|success|warning|error|rainbow|#RRGGBB
-/vibe spinner-color accent         # spinner color (same palette)
+/vibe color accent                 # fixed label color (pauses agent following)
+/vibe color auto                   # follow the session agent's mode color again
+/vibe spinner-color accent         # fixed spinner color (same palette, pauses following)
+/vibe agent-color plan "#6E9FFF"   # per-agent override (default clears it)
 /vibe shimmer on|off               # animated highlight sweep across the label
 ```
 
