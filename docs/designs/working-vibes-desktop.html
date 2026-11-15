@@ -1,0 +1,589 @@
+<!doctype html>
+<!--
+  Working Vibes in OpenCode Desktop — porting the TUI intent chip into the Desktop app.
+  Answers: how loud should one model-written activity line be, in the one slot above the
+  composer, if it has to pass review by the core team?
+  Axis: register (quiet-native → instrument → expressive), with structure (outside the
+  composer vs inside it) as the secondary variable.
+  Palette and type read from /Applications/OpenCode.app app.asar: v1 tokens
+  (--background-*, --text-*, --border-weak-base) and the v2 semantic set (--v2-*).
+  2026-11-15
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Working Vibes · Desktop port</title>
+<style>
+  /* ---- palette: the app's own dark tokens, resolved to composites ---- */
+  :root{
+    --page:#0a0a0a;            /* document, not the app */
+    --page-line:#1c1c1c;
+
+    --bg:#101010;              /* --background-base (dark) */
+    --bg-strong:#121212;       /* --background-strong */
+    --bg-raised:#151515;       /* --background-stronger */
+    --bg-weak:#1e1e1e;         /* --background-weak */
+    --line:#282828;            /* --border-weak-base */
+    --line-soft:rgba(255,255,255,.08);
+
+    --t0:#efefef;              /* --text-strong  #ffffffef  → 15.6:1 */
+    --t1:#9e9e9e;              /* --text-base    #ffffff9e  → 7.1:1  */
+    --t2:#8a8a8a;              /* meta, 6.1:1 */
+    --t3:#6c6c6c;              /* --text-weak    → 3.6:1, decoration only */
+
+    --accent:#a2bcff;          /* --v2-icon-icon-accent / blue-400 (dark) */
+    --accent-2:#7698fd;        /* blue-500 — dimmest sweep band that still passes */
+    --accent-3:#c3d4fd;        /* blue-300 — sweep highlight shoulder */
+    --danger:#f17471;          /* red-500 → 6.8:1 */
+
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+    --r-md:.375rem; --r-xl:.625rem;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--page);
+    color:var(--t1);
+    font:400 15px/1.55 var(--sans);
+    -webkit-font-smoothing:antialiased;
+    padding:40px 32px 64px;
+  }
+  @media (max-width:720px){ body{padding:24px 16px 48px} }
+
+  .shell{max-width:1440px;margin:0 auto}
+
+  /* ---------- document chrome (quiet) ---------- */
+  .masthead{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 18px;padding-bottom:18px;border-bottom:1px solid var(--page-line)}
+  .eyebrow{font:500 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--t2)}
+  .masthead h1{margin:0;font:600 21px/1.25 var(--sans);letter-spacing:-.01em;color:var(--t0)}
+  .note{margin:14px 0 0;max-width:660px;color:var(--t1);font-size:14px}
+  .note b{color:var(--t0);font-weight:500}
+
+  .controls{display:flex;flex-wrap:wrap;gap:22px;justify-content:space-between;align-items:center;margin:22px 0 18px}
+  .group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .group > .glabel{font:500 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--t2);margin-right:2px}
+
+  .tabs button,.statebar button{
+    font:inherit;font-size:13px;line-height:1;color:var(--t2);background:transparent;
+    border:1px solid transparent;border-radius:999px;padding:7px 13px;cursor:pointer;
+    transition:color .12s,background .12s,border-color .12s;
+  }
+  .tabs button:hover,.statebar button:hover{color:var(--t0)}
+  .tabs button[aria-pressed="true"]{color:var(--t0);background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1)}
+  .statebar button[aria-pressed="true"]{color:var(--accent);background:rgba(162,188,255,.09);border-color:rgba(162,188,255,.22)}
+  .tabs button:focus-visible,.statebar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---------- frame ---------- */
+  .frame{display:none}
+  .frame.on{display:block}
+  .frame-head{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin:0 0 14px}
+  .frame-head .num{font:500 12px/1 var(--mono);color:var(--t2);letter-spacing:.1em}
+  .frame-head h2{margin:0;font:600 15px/1.2 var(--sans);letter-spacing:-.005em;color:var(--t0)}
+  .frame-head p{margin:0;font-size:13px;color:var(--t2);flex:1 1 320px;min-width:0}
+
+  /* ---------- the app window ---------- */
+  .win{
+    display:flex;background:var(--bg);border:1px solid var(--line);
+    border-radius:12px;overflow:hidden;min-height:600px;
+  }
+  @media (max-width:720px){ .win{min-height:520px} }
+
+  /* sidebar */
+  .side{width:236px;flex:0 0 236px;background:var(--bg-strong);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px 10px}
+  .side-top{display:flex;align-items:center;gap:8px;padding:2px 8px 14px}
+  .proj{font-size:13px;font-weight:600;color:var(--t0);letter-spacing:-.005em}
+  .side-top .add{margin-left:auto;width:22px;height:22px;display:grid;place-items:center;border-radius:var(--r-md);color:var(--t2);border:1px solid var(--line)}
+  .side-group{font:500 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--t2);padding:10px 8px 8px}
+  .sitem{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-md);font-size:13px;color:var(--t1);min-width:0}
+  .sitem span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sitem.on{background:rgba(255,255,255,.055);color:var(--t0)}
+  .sitem i{width:5px;height:5px;border-radius:50%;background:var(--t3);flex:0 0 5px}
+  .sitem.on i{background:var(--accent)}
+  .side-foot{margin-top:auto;padding:10px 8px 2px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)}
+  .side-foot .av{width:20px;height:20px;border-radius:50%;background:#3a3a3a;color:var(--t0);display:grid;place-items:center;font:600 12px/1 var(--sans)}
+
+  /* main column */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+  .topbar{display:flex;align-items:center;gap:8px;padding:12px 18px;border-bottom:1px solid var(--line);min-height:46px}
+  .crumb{font-size:12.5px;color:var(--t2);white-space:nowrap}
+  .crumb-sep{color:var(--t2)}
+  .crumb--strong{color:var(--t0);overflow:hidden;text-overflow:ellipsis}
+  .tb-right{margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--t2)}
+  .tb-right .ico{width:24px;height:24px;display:grid;place-items:center;border-radius:var(--r-md)}
+
+  .stream{flex:1;min-height:0;overflow:hidden;padding:22px 18px 6px;display:flex;flex-direction:column;justify-content:flex-end;gap:18px}
+  @media (max-width:520px){ .stream{padding:16px 12px 4px} }
+  .turn{max-width:680px;width:100%;margin:0 auto}
+  .who{font:500 12px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--t2);margin-bottom:7px}
+  .user p{margin:0;background:rgba(255,255,255,.031);border:1px solid var(--line-soft);border-radius:var(--r-xl);padding:11px 14px;font-size:14px;color:var(--t0)}
+  .agent p{margin:0 0 10px;font-size:14px;color:var(--t1)}
+  .agent p:last-child{margin-bottom:0}
+  .agent b{color:var(--t0);font-weight:500}
+  code{font:400 12.5px/1 var(--mono);background:rgba(255,255,255,.055);border:1px solid var(--line-soft);border-radius:var(--r-md);padding:2px 5px;color:var(--accent-3);white-space:nowrap}
+  .tool-row{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--t2)}
+  .tool-row .dot{width:5px;height:5px;border-radius:50%;background:var(--t3);flex:0 0 5px}
+  .tool-row .tname{font:500 12.5px/1 var(--mono);color:var(--t1)}
+  .tool-row .targ{font:400 12.5px/1 var(--mono);color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tool-row .tok{margin-left:auto;font:400 12px/1 var(--mono);color:var(--t2);font-variant-numeric:tabular-nums}
+
+  /* ---------- dock: chip slot + composer ---------- */
+  .dock{padding:6px 18px 16px;background:linear-gradient(180deg,rgba(16,16,16,0) 0%,var(--bg) 42%)}
+  @media (max-width:520px){ .dock{padding:4px 10px 12px} }
+  .dock-in{max-width:680px;margin:0 auto}
+
+  .composer{
+    background:var(--bg-weak);border:1px solid var(--line);border-radius:var(--r-xl);
+    padding:12px 12px 10px;position:relative;overflow:hidden;
+  }
+  .composer textarea{
+    display:block;width:100%;background:transparent;border:0;outline:0;resize:none;
+    font:400 14px/1.5 var(--sans);color:var(--t0);padding:0 2px;height:22px;
+  }
+  .composer textarea::placeholder{color:var(--t1)}
+  .cbar{display:flex;align-items:center;gap:6px;margin-top:10px}
+  .pill{font-size:12px;line-height:1;padding:5px 8px;border-radius:var(--r-md);background:rgba(255,255,255,.055);color:var(--t1);border:1px solid transparent;white-space:nowrap}
+  .pill--agent{color:var(--accent);background:rgba(162,188,255,.1);border-color:rgba(162,188,255,.18);font-weight:500}
+  .pill--model{font-family:var(--mono);color:var(--t1)}
+  .send{
+    margin-left:auto;width:26px;height:26px;display:grid;place-items:center;border-radius:var(--r-md);
+    background:var(--t0);color:#101010;border:0;cursor:pointer;flex:0 0 26px;
+  }
+  .send:hover{background:#fff}
+  .send:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---------- chip shared ---------- */
+  .chip{display:flex;align-items:center;gap:9px;min-width:0}
+  .lbl{font-size:13px;line-height:1.3;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
+  .elapsed{font:400 12px/1 var(--mono);color:var(--t2);font-variant-numeric:tabular-nums;flex:0 0 auto}
+
+  /* arc spinner (native-GUI weight) */
+  .arc{width:12px;height:12px;flex:0 0 12px;border-radius:50%;border:1.5px solid rgba(255,255,255,.14);border-top-color:var(--accent);animation:spin .85s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* 01 · status line */
+  .chip--status{padding:0 2px 12px;display:flex}
+  .chip--status .elapsed{color:var(--t2);padding-right:2px}
+
+  /* 02 · live trace */
+  .chip--trace{
+    position:relative;gap:8px;margin-bottom:10px;height:36px;padding:0 11px;
+    background:var(--bg-raised);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;
+  }
+  .chip--trace .lbl{font-size:12.5px}
+  .chip--trace .sep{width:2px;height:2px;border-radius:50%;background:var(--t3);flex:0 0 2px}
+  .chip--trace .tool{font:400 12px/1 var(--mono);color:var(--t1);background:transparent;border:0;padding:0;white-space:nowrap}
+  .chip--trace .steps{font:400 12px/1 var(--mono);color:var(--t2);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:auto}
+  .chip--trace .steps b{color:var(--t0);font-weight:500}
+  .chip--trace .bar{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.07)}
+  .chip--trace .bar i{display:block;height:100%;background:var(--accent-2);width:55%}
+
+  /* 03 · shimmer sweep */
+  .chip--vibe{gap:9px;padding:0 2px 12px}
+  .brl{width:13px;flex:0 0 13px;text-align:center;font:400 15px/1 var(--mono);color:var(--accent)}
+  .shimmer > span{
+    background-image:linear-gradient(90deg,var(--accent-2) 0%,var(--accent) 26%,var(--accent-3) 40%,#fff 47%,var(--accent-3) 54%,var(--accent) 68%,var(--accent-2) 100%);
+    background-size:280% 100%;
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:sweep 2.1s linear infinite;
+  }
+  @keyframes sweep{from{background-position:130% 0}to{background-position:-150% 0}}
+
+  /* 04 · composer-bound */
+  .composer--bound{padding-top:0}
+  .chip--bound{padding:8px 2px 7px;gap:8px}
+  .composer--bound .hairline{height:1px;background:var(--line);margin:0 -12px}
+  .composer--bound .body{padding-top:11px}
+  .composer--bound .topline{position:absolute;top:0;left:0;right:0;height:2px;overflow:hidden}
+  .composer--bound .topline i{
+    position:absolute;top:0;height:100%;width:34%;
+    background:linear-gradient(90deg,rgba(162,188,255,0) 0%,var(--accent-2) 45%,var(--accent) 55%,rgba(162,188,255,0) 100%);
+    animation:patrol 1.9s ease-in-out infinite;
+  }
+  @keyframes patrol{from{left:-36%}to{left:102%}}
+  .dots{display:flex;gap:3px;flex:0 0 auto;padding-left:1px}
+  .dots i{width:4px;height:4px;border-radius:50%;background:var(--accent);opacity:.35;animation:blip 1.15s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}
+  .dots i:nth-child(3){animation-delay:.32s}
+  @keyframes blip{0%,70%,100%{opacity:.28}35%{opacity:1}}
+
+  /* ---------- turn states ---------- */
+  .chip .stop{order:-1;display:none;color:var(--danger);flex:0 0 auto;font:400 12px/1 var(--mono)}
+
+  body[data-state="pending"] .lbl,
+  body[data-state="pending"] .sep{visibility:hidden}
+  body[data-state="idle"] .chip{display:none}
+  body[data-state="idle"] .dock{background:var(--bg)}
+  body[data-state="idle"] .composer--bound .hairline,
+  body[data-state="idle"] .composer--bound .topline{display:none}
+
+  body[data-state="interrupted"] .arc,
+  body[data-state="interrupted"] .brl,
+  body[data-state="interrupted"] .dots,
+  body[data-state="interrupted"] .chip--trace .bar,
+  body[data-state="interrupted"] .composer--bound .topline{display:none}
+  body[data-state="interrupted"] .chip .stop{display:inline}
+  body[data-state="interrupted"] .lbl{color:var(--danger)}
+  body[data-state="interrupted"] .chip--trace{border-color:rgba(241,116,113,.28);background:rgba(241,116,113,.05)}
+  body[data-state="interrupted"] .chip--trace .steps{color:var(--danger)}
+  body[data-state="interrupted"] .elapsed{color:var(--t2)}
+
+  body[data-state="long"] .chip--trace .tool,
+  body[data-state="long"] .chip--trace .sep,
+  body[data-state="long"] .chip--trace .steps{display:none}
+
+  /* ---------- footer: token map ---------- */
+  .foot{margin-top:26px;border-top:1px solid var(--page-line);padding-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px 26px}
+  .foot div{min-width:0}
+  .foot dt{font:500 12px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--t2);margin-bottom:6px}
+  .foot dd{margin:0;font-size:12.5px;color:var(--t1);line-height:1.5}
+  .foot code{padding:1px 4px}
+
+  @media (max-width:900px){
+    .side{display:none}
+  }
+  @media (max-width:520px){
+    .chip--trace .tool, .chip--trace .sep{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .arc,.shimmer > span,.composer--bound .topline i,.dots i{animation:none}
+    .arc{border-top-color:var(--accent);background:#171717}
+    .shimmer > span{background-image:none;color:var(--accent)}
+    .composer--bound .topline i{left:0;width:100%;background:var(--accent-2)}
+  }
+</style>
+</head>
+<body data-state="working">
+<div class="shell">
+
+  <header class="masthead">
+    <span class="eyebrow">OpenCode Desktop · working vibes</span>
+    <h1>One line above the composer, four registers</h1>
+  </header>
+  <p class="note">Same slot in every direction — the TUI put the chip directly above the input, and that is
+    already agreed. What is not agreed is <b>how loud it is</b>. The window below is the real session view,
+    styled with the app's own tokens; only the chip band changes. The label is <b>model output</b> — 3–6 words, one per tool
+    call, arriving a beat after the work starts and sometimes not arriving at all — so the chip
+    cycles real lines here instead of one tidy sentence. Turn state is shared across all four.</p>
+
+  <div class="controls">
+    <div class="group">
+      <div class="tabs" role="tablist" aria-label="Design direction">
+        <button role="tab" data-frame="f1" aria-pressed="true" aria-controls="f1">Status line</button>
+        <button role="tab" data-frame="f2" aria-pressed="false" aria-controls="f2">Live trace</button>
+        <button role="tab" data-frame="f3" aria-pressed="false" aria-controls="f3">Shimmer sweep</button>
+        <button role="tab" data-frame="f4" aria-pressed="false" aria-controls="f4">Composer-bound</button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="glabel">Turn</span>
+      <div class="statebar" role="group" aria-label="Turn state">
+        <button data-state-btn="working" aria-pressed="true">Working</button>
+        <button data-state-btn="pending" aria-pressed="false">No line yet</button>
+        <button data-state-btn="long" aria-pressed="false">Long label</button>
+        <button data-state-btn="interrupted" aria-pressed="false">Interrupted</button>
+        <button data-state-btn="idle" aria-pressed="false">Idle</button>
+      </div>
+    </div>
+  </div>
+
+  <main>
+
+  <!-- ============================ 01 · STATUS LINE ============================ -->
+  <section class="frame on" id="f1" aria-labelledby="h1x">
+    <div class="frame-head"><span class="num">01</span><h2 id="h1x">Status line</h2>
+      <p>Ship-able today. One muted line, no container, no motion beyond a native spinner — it costs nothing and claims nothing.</p></div>
+    <div class="win">
+      <aside class="side" aria-hidden="true">
+        <div class="side-top"><span class="proj">opencode</span><span class="add">+</span></div>
+        <div class="side-group">Sessions</div>
+        <div class="sitem on"><i></i><span>Scroll restore in session panel</span></div>
+        <div class="sitem"><i></i><span>Plugin typecheck script</span></div>
+        <div class="sitem"><i></i><span>Desktop theme tokens</span></div>
+        <div class="sitem"><i></i><span>Release 0.4.2 notes</span></div>
+        <div class="sitem"><i></i><span>Bash timeout on CI</span></div>
+        <div class="side-foot"><span class="av">AG</span><span>ahmed</span></div>
+      </aside>
+      <div class="main">
+        <div class="topbar">
+          <span class="crumb">opencode</span><span class="crumb-sep">/</span>
+          <span class="crumb crumb--strong">Scroll restore in session panel</span>
+          <div class="tb-right" aria-hidden="true">
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/></svg></span>
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="2.6" r="1.2"/><circle cx="8" cy="13.4" r="1.2"/><circle cx="2.6" cy="8" r="1.2"/><circle cx="13.4" cy="8" r="1.2"/></svg></span>
+          </div>
+        </div>
+        <div class="stream">
+          <div class="turn user"><div class="who">You</div><p>Panel scroll jumps to the top whenever I switch session tabs. Find it.</p></div>
+          <div class="turn agent">
+            <div class="who">Build</div>
+            <p>It is the panel remounting, not the scroll container: the drawer rebuilds the list on every tab change, so <code>scrollTop</code> resets to 0. I will hoist the offset into the route store.</p>
+            <div class="tool-row"><span class="dot"></span><span class="tname">read</span><span class="targ">src/routes/session.tsx</span><span class="tok">1.2k</span></div>
+          </div>
+        </div>
+        <div class="dock"><div class="dock-in">
+          <div class="chip chip--status">
+            <span class="arc" aria-hidden="true"></span>
+            <span class="lbl" data-lbl data-alt-long="Refactoring the session panel scroll restoration across the renderer routes and the panel drawer" data-alt-int="Interrupted — scroll position is still lost">Tracing the session panel scroll</span>
+            <span class="stop" aria-hidden="true">■</span>
+            <span class="elapsed" data-elapsed>0:42</span>
+          </div>
+          <div class="composer">
+            <textarea rows="1" placeholder="Ask anything, @ to mention, / for commands" aria-label="Prompt"></textarea>
+            <div class="cbar"><span class="pill pill--agent">build</span><span class="pill pill--model">deepseek v4.1</span>
+              <button class="send" aria-label="Send message"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.4M3.6 7.8 8 3.4l4.4 4.4"/></svg></button>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 02 · LIVE TRACE ============================ -->
+  <section class="frame" id="f2" aria-labelledby="h2x">
+    <div class="frame-head"><span class="num">02</span><h2 id="h2x">Live trace</h2>
+      <p>Answers <em>what</em> and <em>how long</em>, not just which sentence. Earns a bordered strip and a step counter; invites the review argument about chrome.</p></div>
+    <div class="win">
+      <aside class="side" aria-hidden="true">
+        <div class="side-top"><span class="proj">opencode</span><span class="add">+</span></div>
+        <div class="side-group">Sessions</div>
+        <div class="sitem on"><i></i><span>Scroll restore in session panel</span></div>
+        <div class="sitem"><i></i><span>Plugin typecheck script</span></div>
+        <div class="sitem"><i></i><span>Desktop theme tokens</span></div>
+        <div class="sitem"><i></i><span>Release 0.4.2 notes</span></div>
+        <div class="sitem"><i></i><span>Bash timeout on CI</span></div>
+        <div class="side-foot"><span class="av">AG</span><span>ahmed</span></div>
+      </aside>
+      <div class="main">
+        <div class="topbar">
+          <span class="crumb">opencode</span><span class="crumb-sep">/</span>
+          <span class="crumb crumb--strong">Scroll restore in session panel</span>
+          <div class="tb-right" aria-hidden="true">
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/></svg></span>
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="2.6" r="1.2"/><circle cx="8" cy="13.4" r="1.2"/><circle cx="2.6" cy="8" r="1.2"/><circle cx="13.4" cy="8" r="1.2"/></svg></span>
+          </div>
+        </div>
+        <div class="stream">
+          <div class="turn user"><div class="who">You</div><p>Panel scroll jumps to the top whenever I switch session tabs. Find it.</p></div>
+          <div class="turn agent">
+            <div class="who">Build</div>
+            <p>It is the panel remounting, not the scroll container: the drawer rebuilds the list on every tab change, so <code>scrollTop</code> resets to 0. I will hoist the offset into the route store.</p>
+            <div class="tool-row"><span class="dot"></span><span class="tname">read</span><span class="targ">src/routes/session.tsx</span><span class="tok">1.2k</span></div>
+          </div>
+        </div>
+        <div class="dock"><div class="dock-in">
+          <div class="chip chip--trace">
+            <span class="arc" aria-hidden="true"></span>
+            <span class="stop" aria-hidden="true">■</span>
+            <span class="lbl" data-lbl data-alt-long="Refactoring the session panel scroll restoration across the renderer routes and the panel drawer" data-alt-int="Interrupted — scroll position is still lost">Tracing scroll restore</span>
+            <span class="sep" aria-hidden="true"></span>
+            <span class="tool" data-tool>read session.tsx</span>
+            <span class="steps">step <b>3</b></span>
+            <span class="elapsed" data-elapsed>0:42</span>
+            <span class="bar" aria-hidden="true"><i></i></span>
+          </div>
+          <div class="composer">
+            <textarea rows="1" placeholder="Ask anything, @ to mention, / for commands" aria-label="Prompt"></textarea>
+            <div class="cbar"><span class="pill pill--agent">build</span><span class="pill pill--model">deepseek v4.1</span>
+              <button class="send" aria-label="Send message"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.4M3.6 7.8 8 3.4l4.4 4.4"/></svg></button>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 03 · SHIMMER SWEEP ============================ -->
+  <section class="frame" id="f3" aria-labelledby="h3x">
+    <div class="frame-head"><span class="num">03</span><h2 id="h3x">Shimmer sweep</h2>
+      <p>The TUI, faithfully: braille spinner at 120ms, per-glyph accent sweep, no container. Most character, worst odds in a core review.</p></div>
+    <div class="win">
+      <aside class="side" aria-hidden="true">
+        <div class="side-top"><span class="proj">opencode</span><span class="add">+</span></div>
+        <div class="side-group">Sessions</div>
+        <div class="sitem on"><i></i><span>Scroll restore in session panel</span></div>
+        <div class="sitem"><i></i><span>Plugin typecheck script</span></div>
+        <div class="sitem"><i></i><span>Desktop theme tokens</span></div>
+        <div class="sitem"><i></i><span>Release 0.4.2 notes</span></div>
+        <div class="sitem"><i></i><span>Bash timeout on CI</span></div>
+        <div class="side-foot"><span class="av">AG</span><span>ahmed</span></div>
+      </aside>
+      <div class="main">
+        <div class="topbar">
+          <span class="crumb">opencode</span><span class="crumb-sep">/</span>
+          <span class="crumb crumb--strong">Scroll restore in session panel</span>
+          <div class="tb-right" aria-hidden="true">
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/></svg></span>
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="2.6" r="1.2"/><circle cx="8" cy="13.4" r="1.2"/><circle cx="2.6" cy="8" r="1.2"/><circle cx="13.4" cy="8" r="1.2"/></svg></span>
+          </div>
+        </div>
+        <div class="stream">
+          <div class="turn user"><div class="who">You</div><p>Panel scroll jumps to the top whenever I switch session tabs. Find it.</p></div>
+          <div class="turn agent">
+            <div class="who">Build</div>
+            <p>It is the panel remounting, not the scroll container: the drawer rebuilds the list on every tab change, so <code>scrollTop</code> resets to 0. I will hoist the offset into the route store.</p>
+            <div class="tool-row"><span class="dot"></span><span class="tname">read</span><span class="targ">src/routes/session.tsx</span><span class="tok">1.2k</span></div>
+          </div>
+        </div>
+        <div class="dock"><div class="dock-in">
+          <div class="chip chip--vibe">
+            <span class="brl" data-braille aria-hidden="true">⠋</span>
+            <span class="stop" aria-hidden="true">■</span>
+            <span class="lbl shimmer"><span data-lbl data-alt-long="Refactoring the session panel scroll restoration across the renderer routes and the panel drawer" data-alt-int="Interrupted — scroll position is still lost">Tracing the session panel scroll</span></span>
+            <span class="elapsed" data-elapsed>0:42</span>
+          </div>
+          <div class="composer">
+            <textarea rows="1" placeholder="Ask anything, @ to mention, / for commands" aria-label="Prompt"></textarea>
+            <div class="cbar"><span class="pill pill--agent">build</span><span class="pill pill--model">deepseek v4.1</span>
+              <button class="send" aria-label="Send message"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.4M3.6 7.8 8 3.4l4.4 4.4"/></svg></button>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 04 · COMPOSER-BOUND ============================ -->
+  <section class="frame" id="f4" aria-labelledby="h4x">
+    <div class="frame-head"><span class="num">04</span><h2 id="h4x">Composer-bound</h2>
+      <p>No new band at all: the chip becomes the input's own header row, so the box grows 29px while working and returns to one line when idle. Structural bet, not a colour.</p></div>
+    <div class="win">
+      <aside class="side" aria-hidden="true">
+        <div class="side-top"><span class="proj">opencode</span><span class="add">+</span></div>
+        <div class="side-group">Sessions</div>
+        <div class="sitem on"><i></i><span>Scroll restore in session panel</span></div>
+        <div class="sitem"><i></i><span>Plugin typecheck script</span></div>
+        <div class="sitem"><i></i><span>Desktop theme tokens</span></div>
+        <div class="sitem"><i></i><span>Release 0.4.2 notes</span></div>
+        <div class="sitem"><i></i><span>Bash timeout on CI</span></div>
+        <div class="side-foot"><span class="av">AG</span><span>ahmed</span></div>
+      </aside>
+      <div class="main">
+        <div class="topbar">
+          <span class="crumb">opencode</span><span class="crumb-sep">/</span>
+          <span class="crumb crumb--strong">Scroll restore in session panel</span>
+          <div class="tb-right" aria-hidden="true">
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/></svg></span>
+            <span class="ico"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="2.6" r="1.2"/><circle cx="8" cy="13.4" r="1.2"/><circle cx="2.6" cy="8" r="1.2"/><circle cx="13.4" cy="8" r="1.2"/></svg></span>
+          </div>
+        </div>
+        <div class="stream">
+          <div class="turn user"><div class="who">You</div><p>Panel scroll jumps to the top whenever I switch session tabs. Find it.</p></div>
+          <div class="turn agent">
+            <div class="who">Build</div>
+            <p>It is the panel remounting, not the scroll container: the drawer rebuilds the list on every tab change, so <code>scrollTop</code> resets to 0. I will hoist the offset into the route store.</p>
+            <div class="tool-row"><span class="dot"></span><span class="tname">read</span><span class="targ">src/routes/session.tsx</span><span class="tok">1.2k</span></div>
+          </div>
+        </div>
+        <div class="dock"><div class="dock-in">
+          <div class="composer composer--bound">
+            <div class="topline" aria-hidden="true"><i></i></div>
+            <div class="chip chip--bound">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="stop" aria-hidden="true">■</span>
+              <span class="lbl" data-lbl data-alt-long="Refactoring the session panel scroll restoration across the renderer routes and the panel drawer" data-alt-int="Interrupted — scroll position is still lost">Tracing the session panel scroll</span>
+              <span class="elapsed" data-elapsed>0:42</span>
+            </div>
+            <div class="hairline" aria-hidden="true"></div>
+            <div class="body">
+              <textarea rows="1" placeholder="Ask anything, @ to mention, / for commands" aria-label="Prompt"></textarea>
+              <div class="cbar"><span class="pill pill--agent">build</span><span class="pill pill--model">deepseek v4.1</span>
+                <button class="send" aria-label="Send message"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.4M3.6 7.8 8 3.4l4.4 4.4"/></svg></button>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  </main>
+
+  <dl class="foot">
+    <div><dt>Chip label</dt><dd><code>--text-base</code> · <code>#ffffff9e</code> on <code>#101010</code> · 7.1:1</dd></div>
+    <div><dt>Meta &amp; elapsed</dt><dd><code>#ffffff8a</code> · 6.1:1 · tabular figures</dd></div>
+    <div><dt>Accent</dt><dd><code>--v2-icon-icon-accent</code> · blue-400 <code>#a2bcff</code>; sweep floor blue-500 <code>#7698fd</code></dd></div>
+    <div><dt>Container</dt><dd><code>--background-weak</code> <code>#1e1e1e</code> + <code>--border-weak-base</code> <code>#282828</code> · radius <code>--radius-md .375rem</code> / <code>--radius-xl .625rem</code></dd></div>
+    <div><dt>Type</dt><dd>Inter 13px/1.3 for the label, IBM Plex Mono 12px for tool names. This file uses system stacks — the real ones are in the bundle.</dd></div>
+    <div><dt>Because the text is generated</dt><dd>Variable length and one line per tool call: the chip reserves its row (<code>visibility</code>, not <code>display</code>) so nothing jumps when a line lands or is withheld as a repeat.</dd></div>
+    <div><dt>Not modelled</dt><dd>Sidebar behaviour, message virtualization, the /vibe settings surface, and the narrator itself. Only the chip band is under review.</dd></div>
+  </dl>
+</div>
+
+<script>
+(function () {
+  var tabs = [].slice.call(document.querySelectorAll('.tabs button'));
+  var frames = [].slice.call(document.querySelectorAll('.frame'));
+  function show(id) {
+    tabs.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.frame === id)); });
+    frames.forEach(function (f) { f.classList.toggle('on', f.id === id); });
+  }
+  tabs.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.frame); }); });
+  document.querySelector('.tabs').addEventListener('keydown', function (e) {
+    var i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    var n = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : -1;
+    if (n < 0) return;
+    e.preventDefault();
+    tabs[(n + tabs.length) % tabs.length].focus();
+    show(tabs[(n + tabs.length) % tabs.length].dataset.frame);
+  });
+
+  // turn state is shared by every frame
+  var sBtns = [].slice.call(document.querySelectorAll('.statebar button'));
+  var labels = [].slice.call(document.querySelectorAll('[data-lbl]'));
+  var tools = [].slice.call(document.querySelectorAll('[data-tool]'));
+
+  // what the narrator actually emits: one short line per tool call, in order, never a tool name
+  var LINES = [
+    { t: 'Tracing the session panel scroll', tool: 'read session.tsx' },
+    { t: 'Reading the panel drawer', tool: 'read drawer.tsx' },
+    { t: 'Hoisting the scroll offset', tool: 'edit session.tsx' },
+    { t: 'Checking the route store', tool: 'read route.ts' },
+    { t: 'Running the renderer tests', tool: 'bash bun test' }
+  ];
+  var n = 0;
+  function paint() {
+    var s = document.body.dataset.state;
+    var line = s === 'long' ? labels[0].dataset.altLong
+             : s === 'interrupted' ? labels[0].dataset.altInt
+             : LINES[n].t;
+    labels.forEach(function (l) { l.textContent = line; });
+    tools.forEach(function (el) { el.textContent = LINES[n].tool; });
+  }
+  function setState(s) {
+    document.body.dataset.state = s;
+    sBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.stateBtn === s)); });
+    paint();
+  }
+  sBtns.forEach(function (b) { b.addEventListener('click', function () { setState(b.dataset.stateBtn); }); });
+  setInterval(function () {
+    if (document.body.dataset.state !== 'working') return;
+    n = (n + 1) % LINES.length;
+    paint();
+  }, 2600);
+
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var braille = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  var cells = [].slice.call(document.querySelectorAll('[data-braille]'));
+  var i = 0;
+  if (cells.length && !reduce.matches) {
+    setInterval(function () { i = (i + 1) % braille.length; cells.forEach(function (c) { c.textContent = braille[i]; }); }, 120);
+  }
+
+  var clocks = [].slice.call(document.querySelectorAll('[data-elapsed]'));
+  var secs = 42;
+  setInterval(function () {
+    var st = document.body.dataset.state;
+    if (st === 'idle' || st === 'interrupted') return;
+    secs++;
+    var t = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+    clocks.forEach(function (c) { c.textContent = t; });
+  }, 1000);
+})();
+</script>
+</body>
+</html>
