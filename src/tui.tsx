@@ -3,16 +3,17 @@
 //
 // The semantic activity layer (ported from pi-working-vibes) is the single writer of
 // the chip's text: a delta of what the turn just did is summarized by a small model,
-// sanitized, and de-duplicated. Spinner and label default to Claude Code orange; the
-// shimmer sweep's highlight/accent/dim bands resolve from the active OpenCode theme.
-import { Plugin } from "@opencode-ai/plugin/tui";
+// sanitized, and de-duplicated. Spinner and label default to the active theme's accent
+// and muted tokens; the shimmer sweep's highlight/accent/dim bands resolve from the same
+// theme.
+import type { Plugin } from "@opencode-ai/plugin/tui";
 import type { Renderable, TextNodeRenderable, TextRenderable } from "@opentui/core";
 import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show } from "solid-js";
 
-import { latestToolActivity } from "./activity.js";
+import { latestToolActivity } from "./core/activity.js";
 import {
   bandColor,
   isVibeColor,
@@ -24,14 +25,16 @@ import {
   type ThemeLike,
   type VibeColor,
 } from "./color.js";
-import { latestUserText, type MessageLike } from "./intent.js";
-import { generateText, parseModel, type ModelRef } from "./narration.js";
-import { buildSummaryPrompt, buildToolSummaryPrompt } from "./semantic.js";
-import { SemanticDriver } from "./semantic-driver.js";
+import { define } from "./define.js";
+import { latestUserText, type MessageLike } from "./core/intent.js";
+import { generateText, parseModel, type ModelRef } from "./core/narration.js";
+import { buildSummaryPrompt, buildToolSummaryPrompt } from "./core/semantic.js";
+import { SemanticDriver } from "./core/semantic-driver.js";
 import {
   BUILTIN_AGENT_COLORS,
   DEFAULT_SETTINGS,
   resolveSettings,
+  SETTINGS_VERSION,
   SHIMMER_EXIT_OFFSET,
   SHIMMER_FRAME_MS,
   SHIMMER_PAUSE_MS,
@@ -58,7 +61,7 @@ function trace(message: string): void {
 
 // Stamped at load so a stale TUI (one started before the last edit) is instantly
 // obvious in the debug log instead of being mistaken for the new code.
-const BUILD = "strategy-trace-1";
+const BUILD = "theme-frames-1";
 trace(`module loaded pid=${process.pid} cwd=${process.cwd()} build=${BUILD}`);
 
 /** The message slice after the last user message (the current turn). */
@@ -238,6 +241,7 @@ function VibeChip(props: {
   const ensureDriver = (): SemanticDriver => {
     driver ??= new SemanticDriver({
       config: {
+        firstDispatchMs: cfg().semanticFirstDispatchMs,
         debounceMs: cfg().semanticDebounceMs,
         maxWaitMs: cfg().semanticMaxWaitMs,
         minIntervalMs: cfg().semanticMinIntervalMs,
@@ -291,14 +295,20 @@ function VibeChip(props: {
     updateAgent();
 
     // Poll the session status: this build does not deliver session.status events
-    // to plugin handlers, and the data layer is the source of truth.
+    // to plugin handlers, and the data layer is the source of truth. Two cadences
+    // live here: reading the local status is free, so it runs at 150ms to keep the
+    // chip's appearance tight, while message.sync is a server round-trip that only
+    // feeds the driver during a live turn — so it fires on the transition into a
+    // turn and then at 300ms, and not at all while the session is idle.
     let ticks = 0;
     const timer = setInterval(() => {
-      updateRunning(readRunning());
+      const live = readRunning();
+      const turnedOn = live && !running();
+      updateRunning(live);
       updateAgent();
       ticks += 1;
-      if (ticks % 3 === 0) void props.context.data.session.message.sync(props.sessionID);
-    }, 400);
+      if (live && (turnedOn || ticks % 2 === 0)) void props.context.data.session.message.sync(props.sessionID);
+    }, 150);
 
     const stopStatus = props.context.data.on("session.status", (event) => {
       if (event.data.sessionID !== props.sessionID) return;
@@ -475,12 +485,14 @@ function VibeChip(props: {
 
   return (
     <Show when={running()}>
+      {/* One blank row below, so the chip is not flush against the composer frame. */}
       <box
         flexDirection="row"
         gap={1}
         width="100%"
         height={1}
         minHeight={1}
+        marginBottom={1}
         flexShrink={0}
         onSizeChange={traceChipLayout}
       >
@@ -658,10 +670,19 @@ function registerVibeCommand(
   }));
 }
 
-export default Plugin.define({
+export default define({
   id: "working-vibes",
   setup(context) {
     const [settings, updateSettings] = context.storage.store("settings", { initial: DEFAULT_SETTINGS });
+
+    // Adopt the per-tool default for records written before the settings version existed, so an
+    // old default does not pin users to the semantic strategy. An explicit later choice persists.
+    if ((settings.settingsVersion ?? 0) < SETTINGS_VERSION) {
+      void updateSettings((draft) => {
+        draft.strategy = "tools";
+        draft.settingsVersion = SETTINGS_VERSION;
+      });
+    }
 
     registerVibeCommand(context, settings, updateSettings);
 

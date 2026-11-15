@@ -1,7 +1,7 @@
 // Unit tests for the narration transport: model parsing, endpoint shapes, fallbacks.
 import { describe, expect, test } from "bun:test";
 
-import { generateText, parseModel } from "../src/narration.js";
+import { generateText, parseModel } from "../src/core/narration.js";
 
 describe("parseModel", () => {
   test("parses provider/model and optional variant", () => {

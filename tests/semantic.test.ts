@@ -2,7 +2,7 @@
 // gate, sanitizing, and the driver. Ported from pi-working-vibes' semantic.test.ts.
 import { describe, expect, test } from "bun:test";
 
-import { ActivityBuffer, buildExcerpt, describeToolCall, latestToolActivity, oneLine, redactSecrets } from "../src/activity.js";
+import { ActivityBuffer, buildExcerpt, describeToolCall, latestToolActivity, oneLine, redactSecrets } from "../src/core/activity.js";
 import {
   buildToolSummaryPrompt,
   beginDispatch,
@@ -12,8 +12,8 @@ import {
   isNearDuplicate,
   markActivity,
   sanitizeSummary,
-} from "../src/semantic.js";
-import { SemanticDriver } from "../src/semantic-driver.js";
+} from "../src/core/semantic.js";
+import { SemanticDriver } from "../src/core/semantic-driver.js";
 
 const CADENCE = { debounceMs: 1500, maxWaitMs: 2500, minIntervalMs: 2500 };
 const WORDS = 12;
@@ -172,6 +172,46 @@ describe("cadence", () => {
     expect(cadenceTick(state, 1400, CADENCE, true)).toBe("wait");
     expect(cadenceTick(state, 2500, CADENCE, true)).toBe("dispatch");
   });
+
+  test("the opening dispatch settles briefly instead of riding the burst cap", () => {
+    const config = { ...CADENCE, firstDispatchMs: 400 };
+
+    const opening = createCadence();
+    markActivity(opening, 0);
+    expect(cadenceTick(opening, 399, config, true, true)).toBe("wait");
+    expect(cadenceTick(opening, 400, config, true, true)).toBe("dispatch");
+
+    // The same clock reading is still inside the steady-state burst cap.
+    const steady = createCadence();
+    markActivity(steady, 0);
+    expect(cadenceTick(steady, 400, config, true)).toBe("wait");
+    expect(cadenceTick(steady, 2500, config, true)).toBe("dispatch");
+  });
+
+  test("a streaming turn cannot hold the opening dispatch back", () => {
+    const config = { ...CADENCE, firstDispatchMs: 400 };
+    const state = createCadence();
+    // Activity keeps refreshing, so the quiet condition never becomes true and the
+    // steady-state policy could only ever fire on the burst cap.
+    for (const at of [0, 200, 380]) markActivity(state, at);
+    expect(cadenceTick(state, 399, config, true, true)).toBe("wait");
+    expect(cadenceTick(state, 400, config, true, true)).toBe("dispatch");
+  });
+
+  test("an unpainted opening still respects the call floor", () => {
+    const config = { ...CADENCE, firstDispatchMs: 400 };
+    const state = createCadence();
+    markActivity(state, 0);
+    expect(cadenceTick(state, 400, config, true, true)).toBe("dispatch");
+
+    // The call was skipped, so nothing is painted and the next dispatch is still an
+    // opening one — the floor is what stops that becoming a fast retry loop.
+    beginDispatch(state, 400);
+    endDispatch(state);
+    markActivity(state, 500);
+    expect(cadenceTick(state, 900, config, true, true)).toBe("wait");
+    expect(cadenceTick(state, 2900, config, true, true)).toBe("dispatch");
+  });
 });
 
 describe("sanitizeSummary", () => {
@@ -226,7 +266,14 @@ describe("driver", () => {
   };
 
   function makeHarness(
-    config: Partial<{ debounceMs: number; maxWaitMs: number; minIntervalMs: number; maxWords: number; realtime: boolean }> = {},
+    config: Partial<{
+      debounceMs: number;
+      maxWaitMs: number;
+      minIntervalMs: number;
+      maxWords: number;
+      realtime: boolean;
+      firstDispatchMs: number;
+    }> = {},
   ): Harness {
     let clock = 0;
     let reply: string | (() => string | Promise<string>) = "Investigating why the parser fails";
@@ -383,6 +430,32 @@ describe("driver", () => {
     release?.();
     await pending;
     expect(harness.shown.length).toBe(1);
+  });
+
+  test("the turn's first line paints on the settle window, later lines on the steady cadence", async () => {
+    const harness = makeHarness({ firstDispatchMs: 400 });
+    harness.driver.start();
+    harness.driver.recordRequest("fix the parser");
+    harness.driver.recordToolCall("read", { filePath: "parser.ts" });
+
+    await harness.driver.tick();
+    expect(harness.calls.length).toBe(0);
+
+    harness.advance(400);
+    await harness.driver.tick();
+    expect(harness.calls.length).toBe(1);
+    expect(harness.shown).toEqual(["Investigating why the parser fails"]);
+
+    // With a line on screen the short settle no longer applies: the next update waits
+    // out the steady-state debounce and the call floor like any other.
+    harness.driver.recordToolCall("edit", { filePath: "parser.ts" });
+    harness.advance(400);
+    await harness.driver.tick();
+    expect(harness.calls.length).toBe(1);
+
+    harness.advance(2100);
+    await harness.driver.tick();
+    expect(harness.calls.length).toBe(2);
   });
 
   describe("realtime", () => {

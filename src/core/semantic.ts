@@ -20,6 +20,17 @@ export interface CadenceConfig {
   readonly maxWaitMs: number;
   /** Hard floor between two calls, however busy the turn is. The cost knob. */
   readonly minIntervalMs: number;
+  /**
+   * Settle window for the OPENING line of a turn, before anything has been painted.
+   *
+   * The quiet/burst policy exists so a later line cannot contradict an earlier one
+   * while the turn is still being written. Before the first line there is nothing to
+   * contradict, and since a live turn keeps refreshing the activity signal the quiet
+   * condition never becomes true — so the chip sits on the burst cap. This replaces
+   * both the quiet period and the cap while nothing has been painted. Omitted keeps
+   * the steady-state policy for the opening dispatch too.
+   */
+  readonly firstDispatchMs?: number;
 }
 
 export interface CadenceState {
@@ -41,18 +52,29 @@ export function markActivity(state: CadenceState, now: number): void {
   state.lastActivity = now;
 }
 
-/** Decide what the driver should do right now. */
+/**
+ * Decide what the driver should do right now.
+ *
+ * `opening` marks the first dispatch of a turn, before any line has been painted: the
+ * settle window then stands in for both the quiet period and the burst cap, so the chip
+ * can speak early. The call floor is deliberately NOT relaxed — the goal is one prompt
+ * line, not a burst of them.
+ */
 export function cadenceTick(
   state: CadenceState,
   now: number,
   config: CadenceConfig,
   hasPending: boolean,
+  opening = false,
 ): CadenceAction {
   if (state.inFlight) return "wait";
   if (!hasPending || state.lastActivity === null) return "idle";
 
-  const quiet = now - state.lastActivity >= config.debounceMs;
-  const burstExpired = state.burstStart !== null && now - state.burstStart >= config.maxWaitMs;
+  const settleMs = opening ? (config.firstDispatchMs ?? config.debounceMs) : config.debounceMs;
+  const capMs = opening ? (config.firstDispatchMs ?? config.maxWaitMs) : config.maxWaitMs;
+
+  const quiet = now - state.lastActivity >= settleMs;
+  const burstExpired = state.burstStart !== null && now - state.burstStart >= capMs;
   if (!quiet && !burstExpired) return "wait";
   if (now - state.lastDispatch < config.minIntervalMs) return "wait";
   return "dispatch";
@@ -119,6 +141,7 @@ export function buildToolSummaryPrompt(excerpt: string, maxWords: number): strin
     "- Every tool call gets a status line. Never judge whether an action is useful enough to mention.",
     "- Never claim a result that is not present in the activity.",
     "- Start with a present participle such as Verifying, Fixing, Checking, Searching, or Refactoring.",
+    "- Use the same language as the user's request.",
     "- One line only, no quotes, markdown, or trailing punctuation.",
     "- Always write a status line. Never reply SKIP and never explain yourself.",
   ].join("\n");

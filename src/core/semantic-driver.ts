@@ -133,6 +133,11 @@ export class SemanticDriver {
    * In realtime mode the cadence gate is bypassed entirely: a pending signal
    * dispatches immediately, and a signal arriving during a call is replayed as
    * soon as that call finishes instead of waiting out a debounce.
+   *
+   * In semantic mode the opening dispatch of a turn — nothing painted yet — is
+   * judged against the short settle window rather than the steady-state debounce
+   * and burst cap, so the first line is not charged for a policy that exists to
+   * stop later lines restating themselves.
    */
   async tick(): Promise<void> {
     if (!this.#running) return;
@@ -146,7 +151,8 @@ export class SemanticDriver {
       return;
     }
     const now = this.#now();
-    const action = cadenceTick(this.#cadence, now, this.#options.config, this.#buffer.hasPending);
+    const opening = this.#accepted.length === 0 && this.#current === null;
+    const action = cadenceTick(this.#cadence, now, this.#options.config, this.#buffer.hasPending, opening);
     if (action !== "dispatch") return;
     await this.#dispatch();
   }

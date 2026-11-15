@@ -1,7 +1,7 @@
 // Unit tests for reading the current user request out of OpenCode's message list.
 import { describe, expect, test } from "bun:test";
 
-import { latestUserText, type MessageLike } from "../src/intent.js";
+import { latestUserText, type MessageLike } from "../src/core/intent.js";
 
 describe("latestUserText", () => {
   test("returns the most recent user text", () => {
