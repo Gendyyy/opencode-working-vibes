@@ -113,7 +113,7 @@ export const SUMMARY_SYSTEM_PROMPT = [
   "- One line only. No quotes, no markdown, no code fences, no trailing punctuation.",
   "- Describe what is happening right now, not the mechanics of how tools work.",
   "- Start with a present participle: Investigating, Fixing, Refactoring, Verifying, Adding, Reviewing.",
-  "- Use the same language as the user's request.",
+  "- Always write in English, whatever language the user writes in.",
   "- If the activity contains nothing new worth reporting, reply with exactly: SKIP",
 ].join("\n");
 
@@ -141,7 +141,7 @@ export function buildToolSummaryPrompt(excerpt: string, maxWords: number): strin
     "- Every tool call gets a status line. Never judge whether an action is useful enough to mention.",
     "- Never claim a result that is not present in the activity.",
     "- Start with a present participle such as Verifying, Fixing, Checking, Searching, or Refactoring.",
-    "- Use the same language as the user's request.",
+    "- Always write in English, whatever language the user writes in.",
     "- One line only, no quotes, markdown, or trailing punctuation.",
     "- Always write a status line. Never reply SKIP and never explain yourself.",
   ].join("\n");
