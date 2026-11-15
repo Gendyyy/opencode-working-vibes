@@ -15,22 +15,27 @@
   ],
   "files": [
     "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "exports": {
     ".": "./src/index.ts",
-    "./tui": "./src/tui.tsx"
+    "./tui": "./src/tui.tsx",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
-  },
-  "dependencies": {
-    "@opencode-ai/plugin": "0.0.0-beta-17898"
+    "test": "bun test --conditions=browser",
+    "build:gui": "bun build src/desktop/index.ts --format=cjs --external @opencode/plugin/gui --external solid-js --outfile dist/gui-experimental.cjs",
+    "build": "bun run build:gui",
+    "prepack": "bun run build",
+    "check:runtime-deps": "bun run scripts/check-runtime-deps.ts",
+    "doctor": "bun run scripts/doctor.ts",
+    "check": "bun run typecheck && bun run check:runtime-deps"
   },
   "devDependencies": {
-    "@opencode-ai/client": "0.0.0-beta-17898",
+    "@opencode-ai/plugin": "0.0.0-beta-17898",
     "@opentui/core": "0.6.0",
     "@opentui/solid": "0.6.0",
     "@types/bun": "^1.4.2",

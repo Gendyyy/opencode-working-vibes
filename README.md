@@ -17,31 +17,33 @@ activity buffer, cadence gate, and de-duplication policy are reused.
   *new* since the last accepted line, and asks a small model for a short phrase
   (most lines are 3–6 words) describing the goal of the work. The current session's
   model is used by default; override with `/vibe model provider/model-id`.
-- **Switchable strategy:** `/vibe strategy semantic` summarizes the broader turn;
-  `/vibe strategy tools` asks the model to describe only the newest active tool
-  activity. Both modes generate natural-language labels with the model; tool mode
-  never prints raw tool names or arguments as the chip text.
-- **Spinner and shimmer:** Claude Code's ten-frame asterisk spinner at 120ms, with pi's
+- **Per-tool updates by default:** every tool call narrates as it starts, so the chip
+  changes with the work. `/vibe strategy semantic` switches to broad turn summaries
+  instead. Both modes generate natural-language labels with the model; tool mode never
+  prints raw tool names or arguments as the chip text.
+- **Spinner and shimmer:** a uniform-weight ten-frame braille spinner at 120ms, with pi's
   65ms highlight sweep, accent/dim trail, and pause between passes.
 - **Model-only text:** the model is the sole writer of the chip's label in both
   strategies. Until the first model line lands, the chip shows the spinner alone.
-- **Cadence, not chatter:** `semantic` mode waits for a 1.5s quiet period, caps a
-  continuously streaming turn at 2.5s, and keeps a 2.5s floor between calls; an idle
-  turn makes zero calls.
-- **Real-time tool narration:** `tools` mode skips that throttle entirely — each tool
-  call paints as soon as it lands, with no debounce and no floor. One call still runs
-  at a time, and a tool that arrives mid-call is narrated the moment the current
+- **Real-time tool narration (default):** `tools` mode skips the throttle entirely — each
+  tool call paints as soon as it starts, with no debounce and no floor. One call still
+  runs at a time, and a tool that arrives mid-call is narrated the moment the current
   answer lands, so nothing is dropped.
+- **Optional semantic cadence:** `semantic` mode waits for a 0.9s quiet period, caps a
+  continuously streaming turn at 1.4s, and keeps a 1.4s floor between calls; an idle
+  turn makes zero calls. The turn's **opening** line is exempt from that: while nothing
+  has been painted yet there is no earlier line to contradict, so it settles for only
+  400ms (`semanticFirstDispatchMs`) instead of riding the 1.4s cap. The floor still
+  applies, so an opening call that returns `SKIP` cannot become a retry loop.
 - **De-duplication:** a reworded answer is withheld instead of repainted; a `SKIP`
   consumes the delta, while a rejected answer is kept for the next call.
-- **Claude Code colors:** spinner and label default to Claude Code orange
-  (`#D97757`). With agent following on (the default), they track the session
-  agent's mode color instead: `build` stays Claude orange, `plan` turns blue
-  (`#6E9FFF`), and any agent color you define in `opencode.json` wins over both.
-  Named OpenCode theme colors (`text`, `subdued`, `accent`, `success`, `warning`,
-  `error`), `rainbow`, or any hex color work via `/vibe color`,
-  `/vibe spinner-color`, and `/vibe agent-color <agent> <color>`; the shimmer
-  sweep's highlight, accent, and dim bands still resolve from the live theme.
+- **Theme-native colors:** the spinner defaults to the active theme's `accent` token
+  and the label to `subdued`, so the chip matches whatever theme you run. Agent color
+  following is available but off by default (`/vibe agent-color`); when it is on, a
+  color defined in `opencode.json` wins. Named OpenCode theme colors (`text`,
+  `subdued`, `accent`, `success`, `warning`, `error`), `rainbow`, or any hex color work
+  via `/vibe color`, `/vibe spinner-color`, and `/vibe agent-color <agent> <color>`;
+  the shimmer sweep's highlight, accent, and dim bands still resolve from the live theme.
 - Clears itself when the turn settles; shows nothing while idle.
 
 > The label is generated from the turn's activity via the server's text-generation
@@ -77,17 +79,42 @@ ln -sfn "$PWD" ~/.cache/opencode/node_modules/@agendy/opencode-working-vibes
 Restart the TUI to load the plugin. The package also ships root `index.ts` (server
 entry) and `tui.ts` shims for OpenCode's `plugins/` directory discovery.
 
+## Desktop
+
+The package ships a desktop part too: the same chip, drawn above the composer. It
+is the `./gui-experimental` bundle in `package.json`, and Desktop finds it on its
+own — install the package the same way as above and it appears in
+**Settings → Plugins** as a switchable part of `working-vibes`. Turning it off
+leaves the TUI untouched, and vice versa.
+
+Two differences from the TUI, both deliberate:
+
+- **The chip sits above the composer.** Desktop exposes no slot there, so the part
+  registers in `window.bottom` (its only full-width strip) and moves its own node
+  into the composer's column when one exists — see `place()` in
+  `src/desktop/chip.ts`. If Desktop changes that layout the move is skipped and
+  the chip falls back to the bottom strip.
+- **The desktop bundle narrates for itself** (`src/desktop/line.ts`), because the
+  TUI's narrator lives in another process. A session open in both hosts asks the
+  model twice per turn; moving the writer to the server part is the follow-up.
+
+Build the bundle before Desktop can load it:
+
+```sh
+bun run build   # writes dist/gui-experimental.cjs
+```
+
 ## Use
 
 ```text
 /vibe                              # show current settings
-  /vibe strategy semantic|tools     # choose broad activity or tool-focused narration
+  /vibe strategy semantic|tools     # per-tool (default) or broad narration
 /vibe model provider/model-id[#variant] # override the model (default: session model)
 /vibe model default                # go back to the session model
 /vibe color accent                 # fixed label color (pauses agent following)
 /vibe color auto                   # follow the session agent's mode color again
 /vibe spinner-color accent         # fixed spinner color (same palette, pauses following)
-/vibe agent-color plan "#6E9FFF"   # per-agent override (default clears it)
+/vibe agent-color plan accent       # per-agent override (default clears it)
 /vibe shimmer on|off               # animated highlight sweep across the label
 ```
 
